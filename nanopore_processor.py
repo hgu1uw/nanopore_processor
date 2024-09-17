@@ -4,14 +4,14 @@ Nanopore Sequencing Data Processing Script
 ==========================================
 
 This script automates the processing of Nanopore sequencing data by monitoring
-the `/mnt/c/data` folder recursively for the presence of any "final_summary*.txt" files
-and performing basecalling using the Dorado tool. It sends email notifications when a
+a specified experiment folder for the presence of "final_summary*.txt" files and performing
+basecalling using the Dorado tool. It sends email notifications when a
 "final_summary" file is detected and saves the basecalling output in the same folder.
 
 Usage:
-    python nanopore_processor.py --path "/mnt/c/data"
+    python nanopore_processor.py --path "/path/to/experiment_folder"
 
-Author: Nello
+Author: Your Name
 License: MIT
 """
 
@@ -230,7 +230,7 @@ def get_experiment_info():
         dict: Experiment information.
     """
     parser = argparse.ArgumentParser(description='Nanopore Sequencing Data Processing')
-    parser.add_argument('--path', required=True, help='Path to the data directory')
+    parser.add_argument('--path', required=True, help='Path to the experiment directory')
     parser.add_argument('--basecalling_method', default='duplex', choices=['simplex', 'duplex'],
                         help='Basecalling method (default: duplex)')
     parser.add_argument('--model', default='sup', help='Model for basecalling (default: sup)')
