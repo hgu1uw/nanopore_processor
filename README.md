@@ -46,7 +46,7 @@ The script continuously monitors a specified experiment folder for the creation 
 1. **Clone or Download the Repository**:
 
    ```bash
-   git clone https://github.com/yourusername/nanopore_processor.git
+   git clone https://github.com/hgu1uw/nanopore_processor.git
    cd nanopore_processor
    ```
 
