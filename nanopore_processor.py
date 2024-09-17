@@ -161,6 +161,7 @@ Please check the final summary file for further details.
 
         self.run_basecalling(command, output_file)
 
+    
     def run_duplex_basecalling(self, file_path):
         """
         Performs duplex basecalling.
@@ -174,19 +175,29 @@ Please check the final summary file for further details.
             logging.error("pod5 folder not found.")
             return
         output_folder = os.path.dirname(file_path)
-        output_file = os.path.join(output_folder, "cL_inline_unaligned_duplexReads.bam")
+        output_file = os.path.join(output_folder, "duplex_basecalled.bam")
 
         command = [
             "dorado",
-            "basecaller",
+            "duplex",
             self.experiment_info["model"],
-            "--duplex",
-            "--kit",
-            self.experiment_info["kit_name"],
-            pod5_folder,
-            "--output",
-            output_file
+            pod5_folder
         ]
+
+        # If needed, add additional arguments here
+        # For example, if you want to specify the output in BAM format, Dorado by default outputs BAM
+
+        # Since the 'duplex' command writes output to stdout, we'll redirect it to the output file
+        try:
+            logging.info(f"Executing command: {' '.join(command)} > {output_file}")
+            with open(output_file, 'w') as outfile:
+                subprocess.run(command, check=True, stdout=outfile)
+            logging.info(f"Duplex basecalling completed. Output saved to {output_file}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Duplex basecalling failed with error: {e}")
+        except Exception as e:
+            logging.exception(f"An unexpected error occurred during duplex basecalling: {e}")
+
 
         self.run_basecalling(command, output_file)
 
@@ -213,14 +224,9 @@ Please check the final summary file for further details.
         return None
 
     def run_basecalling(self, command, output_file):
-        """
-        Runs the basecalling command using subprocess.
-
-        Args:
-            command (list): The command and arguments to run.
-            output_file (str): The path to the output file.
-        """
         try:
+            # Use the full path to the Windows-installed Dorado with the path wrapped in quotes
+            command[0] = "/mnt/c/Users/Lai Lab/Documents/dorado-0.7.3-win64/bin/dorado.exe"
             logging.info(f"Executing command: {' '.join(command)}")
             subprocess.run(command, check=True)
             logging.info(f"Basecalling completed. Output saved to {output_file}")
@@ -228,6 +234,7 @@ Please check the final summary file for further details.
             logging.error(f"Basecalling failed with error: {e}")
         except Exception as e:
             logging.exception(f"An unexpected error occurred during basecalling: {e}")
+
 
     def stop(self):
         """Stops the observer."""
