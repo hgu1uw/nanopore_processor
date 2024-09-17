@@ -8,10 +8,15 @@ a specified experiment folder for the presence of "final_summary*.txt" files and
 basecalling using the Dorado tool. It sends email notifications when a
 "final_summary" file is detected and saves the basecalling output in the same folder.
 
+Features:
+- Processes existing "final_summary*.txt" files upon startup.
+- Detects new "final_summary*.txt" files created after the script starts.
+- Provides detailed logging for debugging purposes.
+
 Usage:
     python nanopore_processor.py --path "/path/to/experiment_folder"
 
-Author: Your Name
+Author: Nello
 License: MIT
 """
 
@@ -26,13 +31,15 @@ import signal
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from watchdog.observers import Observer
+# Alternatively, use PollingObserver if needed
+# from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
 
 def setup_logging():
     """Sets up the logging configuration."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # Set logging level to DEBUG for detailed output
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.StreamHandler(sys.stdout)
@@ -55,11 +62,14 @@ class FileWatcher(FileSystemEventHandler):
         if event.is_directory:
             return
         file_name = os.path.basename(event.src_path)
+        logging.info(f"File created: {event.src_path}")  # Log every created file
         if file_name.endswith(".txt") and file_name.startswith("final_summary"):
             if event.src_path not in self.processed_files:
                 logging.info(f"Final summary file detected: {event.src_path}")
                 self.process_file(event.src_path)
                 self.processed_files.add(event.src_path)
+            else:
+                logging.debug(f"File {event.src_path} has already been processed.")
 
     def process_file(self, file_path):
         """Processes the detected 'final_summary' file."""
@@ -190,14 +200,16 @@ Please check the final summary file for further details.
         Returns:
             str or None: Path to the pod5 folder or None if not found.
         """
-        # Assuming 'pod5' folder is in the same directory as the final summary file or one level up
-        possible_paths = [
-            os.path.join(os.path.dirname(file_path), "pod5"),
-            os.path.join(os.path.dirname(os.path.dirname(file_path)), "pod5")
-        ]
-        for path in possible_paths:
-            if os.path.isdir(path):
-                return path
+        # Assuming 'pod5' folder is in the same directory or up to two levels up
+        current_dir = os.path.dirname(file_path)
+        for _ in range(3):  # Check current dir and two levels up
+            pod5_path = os.path.join(current_dir, "pod5")
+            logging.debug(f"Checking for pod5 folder at: {pod5_path}")
+            if os.path.isdir(pod5_path):
+                logging.info(f"Found pod5 folder at: {pod5_path}")
+                return pod5_path
+            current_dir = os.path.dirname(current_dir)
+        logging.error("pod5 folder not found.")
         return None
 
     def run_basecalling(self, command, output_file):
@@ -251,10 +263,23 @@ def main():
         logging.info(f"Monitoring path: {data_path} recursively")
 
         observer = Observer()
+        # If using PollingObserver, uncomment the following line and comment out the above
+        # observer = PollingObserver()
         event_handler = FileWatcher(experiment_info, observer)
         observer.schedule(event_handler, path=data_path, recursive=True)
         observer.start()
         logging.info("File watcher started.")
+
+        # Process existing final_summary files upon startup
+        logging.info("Checking for existing final_summary files...")
+        for root, _, files in os.walk(data_path):
+            for file_name in files:
+                if file_name.endswith(".txt") and file_name.startswith("final_summary"):
+                    file_path = os.path.join(root, file_name)
+                    if file_path not in event_handler.processed_files:
+                        logging.info(f"Processing existing final summary file: {file_path}")
+                        event_handler.process_file(file_path)
+                        event_handler.processed_files.add(file_path)
 
         def signal_handler(sig, frame):
             logging.info('Script terminated by user.')
