@@ -12,9 +12,10 @@ Features:
 - Processes existing "final_summary*.txt" files upon startup.
 - Detects new "final_summary*.txt" files created after the script starts.
 - Provides detailed logging for debugging purposes.
+- Uses a configuration file for easy parameter adjustments.
 
 Usage:
-    python nanopore_processor.py --path "/path/to/experiment_folder"
+    python nanopore_processor.py --config "config.ini"
 
 Author: Nello
 License: MIT
@@ -28,13 +29,20 @@ import smtplib
 import logging
 import argparse
 import signal
+import configparser  # For reading the config file
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from watchdog.observers import Observer
-# Alternatively, use PollingObserver if needed
-# from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 
+#If you want to use the environment variables, uncomment the following code for windows, and windows only
+'''
+import os
+
+smtp_user = os.getenv('SMTP_USER')
+smtp_password = os.getenv('SMTP_PASSWORD')
+
+print(smtp_user, smtp_password)'''
 
 def setup_logging():
     """Sets up the logging configuration."""
@@ -134,7 +142,7 @@ Please check the final summary file for further details.
 
     def run_simplex_basecalling(self, file_path):
         """
-        Performs simplex basecalling.
+        Performs simplex basecalling using 'dorado basecaller'.
 
         Args:
             file_path (str): The path to the final summary file.
@@ -147,24 +155,32 @@ Please check the final summary file for further details.
         output_folder = os.path.dirname(file_path)
         output_file = os.path.join(output_folder, "simplex_basecalled.bam")
 
+        # Use the model from the config
+        model = self.experiment_info["model"]
+
+        # Use the Dorado executable path from the config
+        dorado_executable = self.experiment_info["dorado_executable"]
+
         command = [
-            "dorado",
+            dorado_executable,
             "basecaller",
-            self.experiment_info["model"],
-            "--simplex",
-            "--kit",
-            self.experiment_info["kit_name"],
-            pod5_folder,
-            "--output",
-            output_file
+            model,
+            pod5_folder
         ]
 
-        self.run_basecalling(command, output_file)
+        try:
+            logging.info(f"Executing command: {' '.join(command)} > {output_file}")
+            with open(output_file, 'w') as outfile:
+                subprocess.run(command, check=True, stdout=outfile)
+            logging.info(f"Simplex basecalling completed. Output saved to {output_file}")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Simplex basecalling failed with error: {e}")
+        except Exception as e:
+            logging.exception(f"An unexpected error occurred during simplex basecalling: {e}")
 
-    
     def run_duplex_basecalling(self, file_path):
         """
-        Performs duplex basecalling.
+        Performs duplex basecalling using 'dorado duplex'.
 
         Args:
             file_path (str): The path to the final summary file.
@@ -177,17 +193,19 @@ Please check the final summary file for further details.
         output_folder = os.path.dirname(file_path)
         output_file = os.path.join(output_folder, "duplex_basecalled.bam")
 
+        # Use the model from the config
+        model = self.experiment_info["model"]
+
+        # Use the Dorado executable path from the config
+        dorado_executable = self.experiment_info["dorado_executable"]
+
         command = [
-            "dorado",
+            dorado_executable,
             "duplex",
-            self.experiment_info["model"],
+            model,
             pod5_folder
         ]
 
-        # If needed, add additional arguments here
-        # For example, if you want to specify the output in BAM format, Dorado by default outputs BAM
-
-        # Since the 'duplex' command writes output to stdout, we'll redirect it to the output file
         try:
             logging.info(f"Executing command: {' '.join(command)} > {output_file}")
             with open(output_file, 'w') as outfile:
@@ -197,9 +215,6 @@ Please check the final summary file for further details.
             logging.error(f"Duplex basecalling failed with error: {e}")
         except Exception as e:
             logging.exception(f"An unexpected error occurred during duplex basecalling: {e}")
-
-
-        self.run_basecalling(command, output_file)
 
     def find_pod5_folder(self, file_path):
         """
@@ -223,19 +238,6 @@ Please check the final summary file for further details.
         logging.error("pod5 folder not found.")
         return None
 
-    def run_basecalling(self, command, output_file):
-        try:
-            # Use the full path to the Windows-installed Dorado with the path wrapped in quotes
-            command[0] = "/mnt/c/Users/Lai Lab/Documents/dorado-0.7.3-win64/bin/dorado.exe"
-            logging.info(f"Executing command: {' '.join(command)}")
-            subprocess.run(command, check=True)
-            logging.info(f"Basecalling completed. Output saved to {output_file}")
-        except subprocess.CalledProcessError as e:
-            logging.error(f"Basecalling failed with error: {e}")
-        except Exception as e:
-            logging.exception(f"An unexpected error occurred during basecalling: {e}")
-
-
     def stop(self):
         """Stops the observer."""
         self.observer.stop()
@@ -243,20 +245,27 @@ Please check the final summary file for further details.
 
 def get_experiment_info():
     """
-    Parses command-line arguments and returns experiment information.
+    Parses the configuration file and returns experiment information.
 
     Returns:
         dict: Experiment information.
     """
     parser = argparse.ArgumentParser(description='Nanopore Sequencing Data Processing')
-    parser.add_argument('--path', required=True, help='Path to the experiment directory')
-    parser.add_argument('--basecalling_method', default='duplex', choices=['simplex', 'duplex'],
-                        help='Basecalling method (default: duplex)')
-    parser.add_argument('--model', default='sup', help='Model for basecalling (default: sup)')
-    parser.add_argument('--kit_name', default='SQK-NBD114-24', help='Kit name (default: SQK-NBD114-24)')
-    parser.add_argument('--email_recipients', default='hgu1@uw.edu', help='Comma-separated email recipients')
+    parser.add_argument('--config', required=True, help='Path to the configuration file')
     args = parser.parse_args()
-    return vars(args)
+
+    config = configparser.ConfigParser()
+    config.read(args.config)
+
+    experiment_info = {
+        "path": config.get("Settings", "path"),
+        "basecalling_method": config.get("Settings", "basecalling_method", fallback="simplex"),
+        "model": config.get("Settings", "model", fallback="hac"),
+        "email_recipients": config.get("Settings", "email_recipients"),
+        "dorado_executable": config.get("Settings", "dorado_executable", fallback="dorado")
+    }
+
+    return experiment_info
 
 
 def main():
@@ -270,7 +279,6 @@ def main():
         logging.info(f"Monitoring path: {data_path} recursively")
 
         # Use PollingObserver for environments where file system events are unreliable
-        # observer = Observer()
         from watchdog.observers.polling import PollingObserver
         observer = PollingObserver()
 
