@@ -262,9 +262,11 @@ def main():
     if os.path.isdir(data_path):
         logging.info(f"Monitoring path: {data_path} recursively")
 
-        observer = Observer()
-        # If using PollingObserver, uncomment the following line and comment out the above
-        # observer = PollingObserver()
+        # Use PollingObserver for environments where file system events are unreliable
+        # observer = Observer()
+        from watchdog.observers.polling import PollingObserver
+        observer = PollingObserver()
+
         event_handler = FileWatcher(experiment_info, observer)
         observer.schedule(event_handler, path=data_path, recursive=True)
         observer.start()
@@ -272,14 +274,21 @@ def main():
 
         # Process existing final_summary files upon startup
         logging.info("Checking for existing final_summary files...")
-        for root, _, files in os.walk(data_path):
-            for file_name in files:
-                if file_name.endswith(".txt") and file_name.startswith("final_summary"):
-                    file_path = os.path.join(root, file_name)
-                    if file_path not in event_handler.processed_files:
-                        logging.info(f"Processing existing final summary file: {file_path}")
-                        event_handler.process_file(file_path)
-                        event_handler.processed_files.add(file_path)
+        try:
+            for root, dirs, files in os.walk(data_path, followlinks=True):
+                logging.debug(f"Entering directory: {root}")
+                for file_name in files:
+                    logging.debug(f"Found file: {file_name}")
+                    if file_name.endswith(".txt") and file_name.startswith("final_summary"):
+                        file_path = os.path.join(root, file_name)
+                        if file_path not in event_handler.processed_files:
+                            logging.info(f"Processing existing final summary file: {file_path}")
+                            event_handler.process_file(file_path)
+                            event_handler.processed_files.add(file_path)
+                        else:
+                            logging.debug(f"File {file_path} has already been processed.")
+        except Exception as e:
+            logging.exception(f"An error occurred while traversing directories: {e}")
 
         def signal_handler(sig, frame):
             logging.info('Script terminated by user.')
