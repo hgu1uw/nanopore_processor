@@ -4,14 +4,14 @@ Nanopore Sequencing Data Processing Script
 ==========================================
 
 This script automates the processing of Nanopore sequencing data by monitoring
-a specified folder for the presence of a "final_summary" file and performing
-basecalling using the Dorado tool. It sends email notifications when a
+the `/mnt/c/data` folder recursively for the presence of any "final_summary*.txt" files
+and performing basecalling using the Dorado tool. It sends email notifications when a
 "final_summary" file is detected and saves the basecalling output in the same folder.
 
 Usage:
-    python nanopore_processor.py --path "/path/to/data" --date "YYYYMMDD"
+    python nanopore_processor.py --path "/mnt/c/data"
 
-Author: Nello Gu
+Author: Nello
 License: MIT
 """
 
@@ -42,7 +42,7 @@ def setup_logging():
 
 class FileWatcher(FileSystemEventHandler):
     """
-    Watches for the creation of 'final_summary' files and triggers processing.
+    Watches for the creation of 'final_summary*.txt' files and triggers processing.
     """
 
     def __init__(self, experiment_info, observer):
@@ -54,7 +54,8 @@ class FileWatcher(FileSystemEventHandler):
         """Called when a file or directory is created."""
         if event.is_directory:
             return
-        if event.src_path.endswith(".txt") and os.path.basename(event.src_path).startswith("final_summary"):
+        file_name = os.path.basename(event.src_path)
+        if file_name.endswith(".txt") and file_name.startswith("final_summary"):
             if event.src_path not in self.processed_files:
                 logging.info(f"Final summary file detected: {event.src_path}")
                 self.process_file(event.src_path)
@@ -90,12 +91,6 @@ class FileWatcher(FileSystemEventHandler):
         logging.info("Sending email notification...")
         subject = "Experiment Summary File Generated"
         body = f"""The final summary file for the experiment has been generated:
-
-Date: {self.experiment_info['date']}
-Basecalling Method: {self.experiment_info['basecalling_method']}
-Input Type: {self.experiment_info['input_type']}
-Sample Type: {self.experiment_info['sample_type']}
-Amplification Method: {self.experiment_info['amplification_method']}
 
 File Path: {file_path}
 
@@ -135,7 +130,10 @@ Please check the final summary file for further details.
             file_path (str): The path to the final summary file.
         """
         logging.info("Running simplex basecalling...")
-        pod5_folder = os.path.join(os.path.dirname(file_path), "pod5")
+        pod5_folder = self.find_pod5_folder(file_path)
+        if not pod5_folder:
+            logging.error("pod5 folder not found.")
+            return
         output_folder = os.path.dirname(file_path)
         output_file = os.path.join(output_folder, "simplex_basecalled.bam")
 
@@ -161,7 +159,10 @@ Please check the final summary file for further details.
             file_path (str): The path to the final summary file.
         """
         logging.info("Running duplex basecalling...")
-        pod5_folder = os.path.join(os.path.dirname(file_path), "pod5")
+        pod5_folder = self.find_pod5_folder(file_path)
+        if not pod5_folder:
+            logging.error("pod5 folder not found.")
+            return
         output_folder = os.path.dirname(file_path)
         output_file = os.path.join(output_folder, "cL_inline_unaligned_duplexReads.bam")
 
@@ -178,6 +179,26 @@ Please check the final summary file for further details.
         ]
 
         self.run_basecalling(command, output_file)
+
+    def find_pod5_folder(self, file_path):
+        """
+        Finds the 'pod5' folder associated with the final summary file.
+
+        Args:
+            file_path (str): The path to the final summary file.
+
+        Returns:
+            str or None: Path to the pod5 folder or None if not found.
+        """
+        # Assuming 'pod5' folder is in the same directory as the final summary file or one level up
+        possible_paths = [
+            os.path.join(os.path.dirname(file_path), "pod5"),
+            os.path.join(os.path.dirname(os.path.dirname(file_path)), "pod5")
+        ]
+        for path in possible_paths:
+            if os.path.isdir(path):
+                return path
+        return None
 
     def run_basecalling(self, command, output_file):
         """
@@ -209,40 +230,14 @@ def get_experiment_info():
         dict: Experiment information.
     """
     parser = argparse.ArgumentParser(description='Nanopore Sequencing Data Processing')
-    parser.add_argument('--path', required=True, help='Path to the experiment data')
-    parser.add_argument('--date', required=True, help='Experiment date in YYYYMMDD format')
+    parser.add_argument('--path', required=True, help='Path to the data directory')
     parser.add_argument('--basecalling_method', default='duplex', choices=['simplex', 'duplex'],
                         help='Basecalling method (default: duplex)')
     parser.add_argument('--model', default='sup', help='Model for basecalling (default: sup)')
     parser.add_argument('--kit_name', default='SQK-NBD114-24', help='Kit name (default: SQK-NBD114-24)')
-    parser.add_argument('--input_type', default='DNA', help='Input type (DNA/RNA) (default: DNA)')
-    parser.add_argument('--sample_type', default='Human', help='Sample type (default: Human)')
-    parser.add_argument('--amplification_method', default='LAMP', help='Amplification method (default: LAMP)')
     parser.add_argument('--email_recipients', default='hgu1@uw.edu', help='Comma-separated email recipients')
     args = parser.parse_args()
     return vars(args)
-
-
-def find_experiment_folder(data_path, experiment_date):
-    """
-    Finds the experiment folder based on the date.
-
-    Args:
-        data_path (str): Path to the data directory.
-        experiment_date (str): Date of the experiment.
-
-    Returns:
-        str or None: Path to the experiment folder or None if not found.
-    """
-    matching_dirs = []
-    for root, dirs, _ in os.walk(data_path):
-        for dir_name in dirs:
-            if dir_name.startswith(experiment_date):
-                matching_dirs.append(os.path.join(root, dir_name))
-    if matching_dirs:
-        # Return the most recent matching directory
-        return max(matching_dirs, key=os.path.getmtime)
-    return None
 
 
 def main():
@@ -250,14 +245,14 @@ def main():
     setup_logging()
     experiment_info = get_experiment_info()
 
-    experiment_folder = find_experiment_folder(experiment_info["path"], experiment_info["date"])
+    data_path = experiment_info["path"]
 
-    if experiment_folder:
-        logging.info(f"Monitoring path: {experiment_folder}")
+    if os.path.isdir(data_path):
+        logging.info(f"Monitoring path: {data_path} recursively")
 
         observer = Observer()
         event_handler = FileWatcher(experiment_info, observer)
-        observer.schedule(event_handler, path=experiment_folder, recursive=False)
+        observer.schedule(event_handler, path=data_path, recursive=True)
         observer.start()
         logging.info("File watcher started.")
 
@@ -279,7 +274,7 @@ def main():
             observer.join()
             logging.info("File watcher stopped.")
     else:
-        logging.error(f"No experiment folder found for the date: {experiment_info['date']}")
+        logging.error(f"Data path does not exist: {data_path}")
 
 
 if __name__ == "__main__":
